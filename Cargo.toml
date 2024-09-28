@@ -1,0 +1,20 @@
+[package]
+name = "ajkshell"
+version = "0.1.0"
+edition = "2021"
+default-run = "main"
+
+[dependencies]
+anyhow = "1.0.89"
+crossterm = "0.28.1"
+
+[[bin]]
+name = "ls"
+
+[[bin]]
+name = "prompt"
+
+[[bin]]
+name = "main"
+path = "src/main.rs"
+
