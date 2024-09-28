@@ -131,10 +131,16 @@ fn main() {
   // path_var.push(':');
   // path_var.push_str(std::env::current_dir().unwrap().as_os_str().to_str().unwrap());
   // path_var.push_str("/target/debug");
+  // let path_postfix = match cfg!(debug) {
+  //   false => "/target/debug",
+  //   true => "/target/release",
+  // }
   let path_var = format!(
     "{}{}:{}",
     std::env::current_dir().unwrap().to_str().unwrap(),
-    "/target/debug",
+    // "/target/debug",
+    // path_postfix,
+    "/build",
     std::env::var("PATH").unwrap(),
   );
   std::env::set_var("PATH", path_var);
