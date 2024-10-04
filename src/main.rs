@@ -1,112 +1,74 @@
 #![feature(ascii_char)]
 #![feature(unboxed_closures)]
+#![feature(trait_alias)]
+// #![feature(new_range_api)]
 
 #[macro_use] extern crate anyhow;
 
 use std::io::Write;
 
+mod utils;
 mod runner;
 mod builtins;
 mod interface;
+mod parser;
 
 
-#[derive(Debug)]
-enum Expr {
-  Command(String),
-  Argument(String),
-  // SubExpr(Option<Vec<Expr>>),
-}
-impl Expr {
-  // pub fn as_os_str(&self) -> std::ffi::OsString {
-  //   match self {
-  //     Self::Command(string) | Self::Argument(string) => {
-  //       return string.into()
-  //     }
-  //   }
-  // }
-  pub fn as_str<'a>(&'a self) -> &'a str {
-    match self {
-      Self::Command(string) | Self::Argument(string) => {
-        return &string
-      }
-    }
-  }
-}
 
-// fn begin_next_token(
-//   current_token_start: usize,
-//   index: usize,
-// ) -> Option<(usize, usize)> {
-//   if current_token_start == index { return None; }
-//   if let Some(index) = index.checked_sub(1) {
-//     return Some((current_token_start, index));
-//   }
-//   else { return None; }
-// }
+trait ReprAsOsStrTrait: ReprAs<Box<[u8]>> {}
+type ReprAsOsStr = std::rc::Rc<dyn ReprAsOsStrTrait>;
 
-
-#[derive(PartialEq, Eq)]
-enum TokenState {
-  None,
-  InsideToken,
-  InsideQuote,
-}
-impl TokenState {
-  pub fn is_isnide_token(&self) -> bool { return *self == Self::InsideToken }
-  // pub fn is_none(&self) -> bool { return *self == Self::None }
-  pub fn is_inside_quote(&self) -> bool { return *self == Self::InsideQuote }
-  // pub fn is_inside_any(&self) -> bool { self.is_isnide_token() | self.is_inside_quote() }
+trait ReprAs<T> {
+  fn repr_as(&self) -> T;
 }
 
 
-fn tokenize(source: &str) -> Vec<Expr> {
-  let mut slices: Vec<&str> = Vec::new();
-  let mut state = TokenState::None;
-  let mut current_slice_start: usize = 0;
+trait SliceTreeSource: AsRef<[u8]> {}
+impl<T: AsRef<[u8]>> SliceTreeSource for T {}
 
-  for (index, chr) in source.chars().enumerate() {
-    match chr {
-      ' ' | '\n' => {
-        if !state.is_isnide_token() { continue }
-
-        slices.push(&source[current_slice_start..index]);
-        state = TokenState::None;
-      },
-      '\"' => {
-        if state.is_inside_quote() {
-          if current_slice_start == index + 1 { slices.push(""); }
-          else { slices.push(&source[current_slice_start+1..index]); }
-          state = TokenState::None;
-          continue
-        }
-        else {
-          if state.is_isnide_token() { panic!("invalid quote placements"); }
-          current_slice_start = index;
-          state = TokenState::InsideQuote;
-          continue
-        }
-      },
-      _ => {
-        if state.is_inside_quote() { continue }
-        if !state.is_isnide_token() { current_slice_start = index; }
-        state = TokenState::InsideToken;
-      },
+#[derive(Debug, Clone)]
+pub struct SliceTree<T: SliceTreeSource> {
+  source: std::rc::Rc<T>,
+  // start inclusive, end exclusive
+  range: std::ops::Range<usize>
+  // start: usize, end: usize,
+}
+// this is so that std::rc::Rc::from(SliceTree<_>) works
+impl<T: SliceTreeSource> ReprAsOsStrTrait for SliceTree<T> {}
+impl<T: SliceTreeSource> AsRef<[u8]> for SliceTree<T> {
+  fn as_ref(&self) -> &[u8] { &self.source.as_ref().as_ref()[self.range.clone()] }
+}
+impl<T: SliceTreeSource> ReprAs<Box<[u8]>> for SliceTree<T> {
+  fn repr_as(&self) -> Box<[u8]> { Box::from(self.as_ref()) }
+}
+impl<T: SliceTreeSource> SliceTree<T> {
+  // consumes a source object and contain it
+  pub fn consume(item: T) -> Self {
+    return Self {
+      range: 0..item.as_ref().len(),
+      source: std::rc::Rc::from(item),
     }
   }
 
-  if current_slice_start != source.len() { slices.push(&source[current_slice_start..source.len()]); }
-
-  let mut tokens: Vec<Expr> = Vec::new();
-
-  let mut command = true;
-
-  for slice in slices.into_iter() {
-    if command { tokens.push(Expr::Command(String::from(slice))); command = false; }
-    else { tokens.push(Expr::Argument(String::from(slice))); }
+  // TODO encode this into the type system maybe
+  // currently panics if any part of the
+  // range argument is greater than the source
+  // object's range
+  pub fn subslice(&self, range: std::ops::Range<usize>) -> Self {
+    if (range.start < self.range.start) |
+      (range.end > self.range.end)
+    { panic!("out of range"); }
+    return Self { source: self.source.clone(), range }
   }
-
-  return tokens;
+  pub fn as_slice<'a>(&'a self) -> &'a[u8] {
+    return &self.source.as_ref().as_ref()[self.range.clone()];
+  }
+  // pub fn len()
 }
+
+
+
+
 
 
 macro_rules! defer {
@@ -194,12 +156,32 @@ fn main() {
       continue;
     }
 
-    let tokens = tokenize(&command_buffer);
+    let tokens = match parser::lex(&command_buffer) {
+      Ok(tokens) => tokens,
+      Err(e) => panic!("Err while lexing input: {}", e)
+    };
 
-    if tokens.len() == 1 && tokens[0].as_str() == "exit" { break; }
+    let command_segments = parser::parse(&tokens).expect("Failed to parse tokens");
 
-    let mut command: std::process::Command = match &tokens[0] {
-      Expr::Command(string) => match string.as_str() {
+    // if command_segments.len() = 1 {}
+    // else 
+    if command_segments.len() > 1 {
+      let mut piped_output: Option<std::process::ChildStdout> = None;
+      for cmd in command_segments.iter().rev() {
+        let mut command = cmd.build();
+        if let Some(output) = piped_output {
+          command.run().unwrap().stdin(std::process::Stdio::from(output));
+        }else { }
+        // piped_output = Some(command.run().unwrap().stdout);
+        // piped_output = command.spawn().unwrap().stdout;
+      }
+    }
+
+    // let base_command = &command_segments[0];
+
+    let mut command: std::process::Command = match tokens[0] {
+    // let mut command = match command_segments[0] {
+      parser::Token::Command(string) => match string {
         "cd" => {
           if let Err(e) = builtins::change_directory(
             tokens.as_slice().into_iter()
@@ -209,9 +191,15 @@ fn main() {
           ) { interface::expect_log_error(e); }
           stdout.write(b"\r\n").unwrap();
           continue;
+        },
+        "exit" => {
+          if let Err(e) = builtins::exit(&tokens_as_slices(&tokens)) {
+            interface::expect_log_error(e);
+          }else { break; }
+          panic!("Impossible condition");
         }
         command => {
-          runner::run_command(command,
+          runner::build_command(command,
             &tokens[1..tokens.len()].into_iter()
               .map(|token| token.as_str())
               .collect::<Vec<&str>>()
@@ -219,7 +207,8 @@ fn main() {
         }
       }
       // this means that the command start with an argument (invalid state)
-      Expr::Argument(_) => panic!("can not happend"),
+      parser::Token::Argument(_) => panic!("can not happend"),
+      parser::Token::Pipe => todo!(),
     };
 
     match command.output() {

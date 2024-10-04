@@ -1,20 +1,11 @@
 
-// #[macro_use] extern crate anyhow;
 
 
 fn main() -> anyhow::Result<()> {
 
-  // let args = std::env::args();
-
-  // default behaviour of prompt
   let dir = std::env::current_dir()?;
   let home = std::env::var("HOME");
 
-  // if let Ok(home_dir) = home {
-  //   todo!()
-  // }else {
-    
-  // }
 
   let prompt_string: String = match home {
     Ok(home_dir) => {
@@ -29,10 +20,6 @@ fn main() -> anyhow::Result<()> {
       else {
         dir.to_str().unwrap().to_owned()
       }
-      // let mut string = String::from("~");
-      // string.push_str(&dir[home_dir.len()])
-
-      // todo!()
     },
     Err(_) => {
       dir.to_str().unwrap().to_owned()
