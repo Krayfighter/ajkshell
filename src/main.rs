@@ -5,7 +5,7 @@
 
 #[macro_use] extern crate anyhow;
 
-use std::{fmt::Pointer, io::{Read, Write}};
+use std::io::{Read, Write};
 
 mod utils;
 mod runner;
@@ -23,7 +23,7 @@ trait ReprAs<T> {
 }
 
 
-trait SliceTreeSource: AsRef<[u8]> {}
+pub trait SliceTreeSource: AsRef<[u8]> {}
 impl<T: AsRef<[u8]>> SliceTreeSource for T {}
 
 #[derive(Clone)]
@@ -168,6 +168,7 @@ fn main() {
       Err(e) => panic!("Err while lexing input: {}", e)
     };
 
+    // each command segment is separated by a pipe
     let command_segments = parser::parse(&tokens).expect("Failed to parse tokens");
 
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
@@ -182,20 +183,20 @@ fn main() {
       children.push(child);
     }
 
-    for (index, child) in children.iter_mut().enumerate() {
+    for child in children.iter_mut() {
       child.wait().expect("Failed to wait for child process to complete");
     }
 
     let mut buffer = String::new();
-    let final_child = children.len()-1;
-    let final_output = prev_stdout
+    // let final_child = children.len()-1;
+    let _final_output = prev_stdout
       .expect("unable to obtain stdout handle of child")
       .read_to_string(&mut buffer);
 
     println!("Final result from running: {}", buffer);
 
     buffer.clear();
-    let final_err = prev_stderr
+    let _final_err = prev_stderr
       .expect("failed to retrieve previous stderr")
       .read_to_string(&mut buffer);
 

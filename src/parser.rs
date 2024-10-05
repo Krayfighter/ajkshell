@@ -5,7 +5,6 @@ pub enum Token {
   Command(crate::SliceTree<String>),
   Argument(crate::SliceTree<String>),
   Pipe,
-  // Expr(Option<Vec<Token<'a>>>),
 }
 impl Token {
   pub fn as_bytes<'a>(&'a self) -> &'a [u8] {
@@ -15,12 +14,6 @@ impl Token {
       _ => b"|",
     }
   }
-  // pub fn as_str<'a>(&'a self) -> &'a str {
-  //   match *self {
-  //     Token::Command(str) | Token::Argument(str) => str,
-  //     Token::Pipe => "|",
-  //   }
-  // }
 }
 
 fn end_token(
@@ -29,8 +22,6 @@ fn end_token(
   end: usize,
   is_command: &mut bool,
 ) -> Token {
-  // assert!(end <= src.len());
-  // let string = &src[start..end];
   let token_slice = src.subslice(start..end);
   let token = match *is_command {
     true => Token::Command(token_slice),
@@ -151,14 +142,12 @@ impl ParsedCommand {
       // cmd => Box::new(crate::runner::build_command(crate::utils::as_str(cmd), &self.args))
       // cmd => crate::runner::OsCommand::spawn(crate::utils::as_str(cmd))
       cmd => {
-        // let mut command = crate::runner::OsCommand::new(
-        //   crate::utils::as_str(cmd)
-        // );
-        // command.args(&self.args);
         let mut command = std::process::Command::new(
           crate::utils::as_str(cmd)
         );
-        // command.stdin(std::process::Stdio::piped())
+        for arg in self.args.iter() {
+          command.arg(crate::utils::as_os_str(arg.repr_as().as_ref()));
+        }
         match stdout {
           Some(stdout) => command.stdin(stdout),
           None => command.stdin(std::process::Stdio::piped())
