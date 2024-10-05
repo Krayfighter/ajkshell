@@ -9,7 +9,6 @@ use std::io::{Read, Write};
 
 mod utils;
 mod runner;
-mod builtins;
 mod interface;
 mod parser;
 
