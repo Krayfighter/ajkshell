@@ -5,7 +5,7 @@
 
 #[macro_use] extern crate anyhow;
 
-use std::io::Write;
+use std::{fmt::Pointer, io::{Read, Write}};
 
 mod utils;
 mod runner;
@@ -26,7 +26,7 @@ trait ReprAs<T> {
 trait SliceTreeSource: AsRef<[u8]> {}
 impl<T: AsRef<[u8]>> SliceTreeSource for T {}
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SliceTree<T: SliceTreeSource> {
   source: std::rc::Rc<T>,
   // start inclusive, end exclusive
@@ -49,11 +49,6 @@ impl<T: SliceTreeSource> SliceTree<T> {
       source: std::rc::Rc::from(item),
     }
   }
-
-  // TODO encode this into the type system maybe
-  // currently panics if any part of the
-  // range argument is greater than the source
-  // object's range
   pub fn subslice(&self, range: std::ops::Range<usize>) -> Self {
     if (range.start < self.range.start) |
       (range.end > self.range.end)
@@ -63,7 +58,16 @@ impl<T: SliceTreeSource> SliceTree<T> {
   pub fn as_slice<'a>(&'a self) -> &'a[u8] {
     return &self.source.as_ref().as_ref()[self.range.clone()];
   }
-  // pub fn len()
+}
+
+impl<T: SliceTreeSource> std::fmt::Debug for SliceTree<T> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return f.write_str(&format!("[{}..{}] ({})",
+      self.range.start,
+      self.range.end,
+      utils::as_str(self.as_slice())
+    ));
+  }
 }
 
 
@@ -156,6 +160,9 @@ fn main() {
       continue;
     }
 
+    // TODO this is temporary for debug
+    if command_buffer.starts_with("exit") { break; }
+
     let tokens = match parser::lex(&command_buffer) {
       Ok(tokens) => tokens,
       Err(e) => panic!("Err while lexing input: {}", e)
@@ -163,77 +170,37 @@ fn main() {
 
     let command_segments = parser::parse(&tokens).expect("Failed to parse tokens");
 
-    // if command_segments.len() = 1 {}
-    // else 
-    if command_segments.len() > 1 {
-      let mut piped_output: Option<std::process::ChildStdout> = None;
-      for cmd in command_segments.iter().rev() {
-        let mut command = cmd.build();
-        if let Some(output) = piped_output {
-          command.run().unwrap().stdin(std::process::Stdio::from(output));
-        }else { }
-        // piped_output = Some(command.run().unwrap().stdout);
-        // piped_output = command.spawn().unwrap().stdout;
-      }
+    let mut prev_stdout: Option<std::process::ChildStdout> = None;
+    let mut prev_stderr: Option<std::process::ChildStderr> = None;
+    let mut children: Vec<std::process::Child> = vec!();
+    for segment in command_segments.into_iter() {
+      let mut command = segment.build(prev_stdout.take().map(|stdout| stdout.into()));
+      let mut child = command.spawn().expect("Failed to spawn child process");
+      prev_stdout = child.stdout.take();
+      prev_stderr = child.stderr.take();
+
+      children.push(child);
     }
 
-    // let base_command = &command_segments[0];
-
-    let mut command: std::process::Command = match tokens[0] {
-    // let mut command = match command_segments[0] {
-      parser::Token::Command(string) => match string {
-        "cd" => {
-          if let Err(e) = builtins::change_directory(
-            tokens.as_slice().into_iter()
-              .map(|expr| expr.as_str())
-              .collect::<Vec<&str>>()
-              .as_slice()
-          ) { interface::expect_log_error(e); }
-          stdout.write(b"\r\n").unwrap();
-          continue;
-        },
-        "exit" => {
-          if let Err(e) = builtins::exit(&tokens_as_slices(&tokens)) {
-            interface::expect_log_error(e);
-          }else { break; }
-          panic!("Impossible condition");
-        }
-        command => {
-          runner::build_command(command,
-            &tokens[1..tokens.len()].into_iter()
-              .map(|token| token.as_str())
-              .collect::<Vec<&str>>()
-          )
-        }
-      }
-      // this means that the command start with an argument (invalid state)
-      parser::Token::Argument(_) => panic!("can not happend"),
-      parser::Token::Pipe => todo!(),
-    };
-
-    match command.output() {
-      Ok(output) => {
-        let mut writer = interface::StdoutWriter{};
-        writer.write(&[b'\n']).expect("unable to queue in stdout writer");
-        writer.write(output.stdout.as_slice()).expect("unable to queue stdout");
-        writer.flush().expect("unable to flush writer to stdout");
-
-        if output.stderr.as_slice().len() != 0 {
-          writer.write(output.stderr.as_slice()).expect("unable to log stderr to program stdout");
-          writer.flush().expect("failed to flush writer to stdout");
-        }
-      },
-      Err(e) => {
-        use crossterm::style::{Print, SetForegroundColor, Color};
-        crossterm::execute!(
-          stdout,
-          Print("\n\r"), SetForegroundColor(Color::Red), Print("Err"),
-          SetForegroundColor(Color::Reset),
-          Print(format!(": {} (missing executable)\n\rTokens: {:?}", e, tokens)),
-          crossterm::style::Print("\n\r"),
-        ).expect("unable to log error to stdout");
-      },
+    for (index, child) in children.iter_mut().enumerate() {
+      child.wait().expect("Failed to wait for child process to complete");
     }
+
+    let mut buffer = String::new();
+    let final_child = children.len()-1;
+    let final_output = prev_stdout
+      .expect("unable to obtain stdout handle of child")
+      .read_to_string(&mut buffer);
+
+    println!("Final result from running: {}", buffer);
+
+    buffer.clear();
+    let final_err = prev_stderr
+      .expect("failed to retrieve previous stderr")
+      .read_to_string(&mut buffer);
+
+    println!("Final Error: {}", buffer);
+
   }
 
   crossterm::execute!(

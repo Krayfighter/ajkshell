@@ -89,34 +89,11 @@ pub fn lex(src: &str) -> anyhow::Result<Vec<Token>> {
   return Ok(tokens);
 }
 
-// TODO: decrecate
-// fn tokens_as_slices<'a>(tokens: &'a [Token<'a>]) -> Vec<&'a str> {
-//   return tokens.into_iter()
-//     .map(|token| token.as_str())
-//     .collect::<Vec<&str>>();
-// }
 
 
-
-
-// enum RunnableCommand {
-//   Os(std::process::Command),
-//   Builtin(std::rc::Rc<dyn FnMut<(&[impl AsRef<std::ffi::OsStr>],), Output = todo!()>>)
-// }
-
-
-// type ArgT = dyn AsRef<std::ffi::OsStr>;
-// type Arg = std::rc::Rc<ArgT>;
-
-// struct ParsedCommand {
-//   command: String,
-//   args: Vec<Arg>,
-// }
-
-
-struct ParsedCommand {
+pub struct ParsedCommand {
   command: crate::SliceTree<String>,
-  // this is can't be a Vec<SliceTree<_>> because
+  // this can't be a Vec<SliceTree<_>> because
   // it may contain subcommands that need to be evaluated
   // so I created a type that has lazy execution that results
   // in a Box<[u8]>
@@ -125,7 +102,7 @@ struct ParsedCommand {
 
 impl crate::ReprAs<Box<[u8]>> for ParsedCommand {
   fn repr_as(&self) -> Box<[u8]> {
-    return self.build().run().unwrap().stdout.into_boxed_slice()
+    todo!();
   }
 }
 
@@ -163,11 +140,34 @@ impl ParsedCommand {
       })
     }
   }
-  pub fn build(&self) -> Box<dyn crate::runner::Runnable> {
+  pub fn build(&self,
+    stdout: Option<std::process::Stdio>
+  ) -> std::process::Command {
     return match self.command.as_ref() {
-      b"cd" => Box::new(crate::builtins::ChangeDirectory::new(self.args.clone())),
-      b"exit" => Box::new(crate::builtins::Exit::new(self.args.clone())),
-      cmd => Box::new(crate::runner::build_command(crate::utils::as_str(cmd), &self.args))
+      b"cd" => todo!(),
+      b"exit" => todo!(),
+      // b"cd" => Box::new(crate::builtins::ChangeDirectory::new(self.args.clone())),
+      // b"exit" => Box::new(crate::builtins::Exit::new(self.args.clone())),
+      // cmd => Box::new(crate::runner::build_command(crate::utils::as_str(cmd), &self.args))
+      // cmd => crate::runner::OsCommand::spawn(crate::utils::as_str(cmd))
+      cmd => {
+        // let mut command = crate::runner::OsCommand::new(
+        //   crate::utils::as_str(cmd)
+        // );
+        // command.args(&self.args);
+        let mut command = std::process::Command::new(
+          crate::utils::as_str(cmd)
+        );
+        // command.stdin(std::process::Stdio::piped())
+        match stdout {
+          Some(stdout) => command.stdin(stdout),
+          None => command.stdin(std::process::Stdio::piped())
+        };
+        command.stdout(std::process::Stdio::piped())
+          .stderr(std::process::Stdio::piped());
+
+        command
+      }
     }
     // let args = self.args.clone().into_iter()
     //   .map(|arg| (arg.as_ref())
