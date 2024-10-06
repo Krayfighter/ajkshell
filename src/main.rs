@@ -71,9 +71,6 @@ impl<T: SliceTreeSource> std::fmt::Debug for SliceTree<T> {
 
 
 
-
-
-
 macro_rules! defer {
   ($name: ident, $code: block) => {
     struct $name {}
@@ -100,7 +97,6 @@ fn main() {
     std::env::var("PATH").unwrap(),
   );
   std::env::set_var("PATH", path_var);
-  println!("PATH: {}", std::env::var("PATH").unwrap());
 
   crossterm::terminal::enable_raw_mode()
     .expect("unable to enable raw mode");
@@ -109,11 +105,14 @@ fn main() {
 
   let mut command_buffer = String::new();
 
+  let mut history: Vec<String> = vec!();
+
   loop {
 
     let mut cursor: usize = 0;
 
     command_buffer.clear();
+    let mut history_index: Option<usize> = Some(0);
     loop {
       interface::display_command_line(cursor, &command_buffer).expect("unable to print command line");
       use crossterm::event::Event as CE;
@@ -141,8 +140,29 @@ fn main() {
               if cursor == command_buffer.len() { cursor = 0; }
               else { cursor += 1; }
             },
-            CKC::Up => { todo!() },
-            CKC::Down => { todo!() },
+            CKC::Up => {
+              if history.len() == 0 { continue }
+              if let None = history_index { history_index = Some(0); }
+              let index = history_index.unwrap();
+              if index+1 < history.len() { history_index = Some(index+1); }
+              command_buffer = history.iter().rev()
+                .nth(index)
+                .unwrap().clone();
+            },
+            CKC::Down => {
+              if let Some(index) = history_index {
+                if index == 0 {
+                  history_index = None;
+                  command_buffer.clear();
+                  continue
+                }
+                history_index = Some(index-1);
+                command_buffer = history.iter().rev()
+                  .nth(history_index.unwrap())
+                  .unwrap()
+                  .clone();
+              }
+            },
             CKC::Enter => break,
             CKC::Esc => return,
             _ => continue,
@@ -158,6 +178,8 @@ fn main() {
       stdout.flush().unwrap();
       continue;
     }
+
+    history.push(command_buffer.clone());
 
     // TODO this is temporary for debug
     if command_buffer.starts_with("exit") { break; }
@@ -186,20 +208,53 @@ fn main() {
       child.wait().expect("Failed to wait for child process to complete");
     }
 
-    let mut buffer = String::new();
-    // let final_child = children.len()-1;
-    let _final_output = prev_stdout
-      .expect("unable to obtain stdout handle of child")
-      .read_to_string(&mut buffer);
+    let mut writer = interface::StdoutWriter {};
 
-    println!("Final result from running: {}", buffer);
+    writer.write(b"\n").unwrap();
+
+    let mut buffer = String::new();
+
+    match prev_stdout.ok_or(anyhow!("no stdout available")) {
+      Ok(mut stdout) => match stdout.read_to_string(&mut buffer) {
+        Ok(_) => {},
+        Err(e) => interface::expect_log_error(e.into()),
+      }
+      Err(e) => interface::expect_log_error(e),
+    }
+
+    match writer.write(buffer.as_bytes()) {
+      Ok(_) => {},
+      Err(e) => interface::expect_log_error(e.into()),
+    }
 
     buffer.clear();
-    let _final_err = prev_stderr
-      .expect("failed to retrieve previous stderr")
-      .read_to_string(&mut buffer);
 
-    println!("Final Error: {}", buffer);
+    match prev_stderr.ok_or(anyhow!("no stderr available")) {
+      Ok(mut stderr) => match stderr.read_to_string(&mut buffer) {
+        Ok(_) => {},
+        Err(e) => interface::expect_log_error(e.into()),
+      },
+      Err(e) => interface::expect_log_error(e)
+    }
+
+    match writer.write(buffer.as_bytes()) {
+      Ok(_) => {},
+      Err(e) => interface::expect_log_error(e.into())
+    }
+    // let mut buffer = String::new();
+    // // let final_child = children.len()-1;
+    // let _final_output = prev_stdout
+    //   .expect("unable to obtain stdout handle of child")
+    //   .read_to_string(&mut buffer);
+
+    // println!("Final result from running: {}", buffer);
+
+    // buffer.clear();
+    // let _final_err = prev_stderr
+    //   .expect("failed to retrieve previous stderr")
+    //   .read_to_string(&mut buffer);
+
+    // println!("Final Error: {}", buffer);
 
   }
 

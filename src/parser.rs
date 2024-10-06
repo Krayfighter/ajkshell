@@ -191,7 +191,7 @@ pub fn parse(tokens: &[Token]) -> anyhow::Result<Vec<ParsedCommand>> {
     pipe_segments.push(&tokens[start..tokens.len()]);
   }else { panic!("Err: Command ends in pipe (pipe from nowhere)") }
 
-  println!("Segments of command: {:?}", pipe_segments);
+  // println!("Segments of command: {:?}", pipe_segments);
 
   // organize subcommands
 
