@@ -1,3 +1,5 @@
+use crate::interface;
+
 
 
 #[derive(Debug)]
@@ -6,15 +8,15 @@ pub enum Token {
   Argument(crate::SliceTree<String>),
   Pipe,
 }
-impl Token {
-  pub fn as_bytes<'a>(&'a self) -> &'a [u8] {
-    return match self {
-      Token::Command(slice) => slice.as_slice(),
-      Token::Argument(slice) => slice.as_slice(),
-      _ => b"|",
-    }
-  }
-}
+// impl Token {
+//   pub fn as_bytes<'a>(&'a self) -> &'a [u8] {
+//     return match self {
+//       Token::Command(slice) => slice.as_slice(),
+//       Token::Argument(slice) => slice.as_slice(),
+//       _ => b"|",
+//     }
+//   }
+// }
 
 fn end_token(
   src: &crate::SliceTree<String>,
@@ -102,7 +104,10 @@ impl crate::ReprAsOsStrTrait for ParsedCommand { }
 
 impl ParsedCommand {
   pub fn new(statement: &[Token]) -> anyhow::Result<ParsedCommand> {
-    if statement.len() == 0 { crate::interface::expect_log_error(anyhow!("Err: Statement of length 0")) }
+    if statement.len() == 0 {
+      crate::interface::log_err("(invalid state) statement of length 0").unwrap();
+      panic!("invalid state");
+    }
     // if statement[0] == Token::Pipe { panic!("command starts with pipe ?not possible"); }
     let command = match &statement[0] {
         Token::Command(cmd) => cmd,
@@ -131,11 +136,21 @@ impl ParsedCommand {
       })
     }
   }
+  // TODO create a new command type
+  // that allows builtin custom commands
+  // through the same interface
   pub fn build(&self,
     stdout: Option<std::process::Stdio>
   ) -> std::process::Command {
     return match self.command.as_ref() {
-      b"cd" => todo!(),
+      b"cd" => {
+        // TODO extract to function
+        if self.args.len() > 0 {
+          std::env::set_current_dir(crate::utils::as_os_str(self.args[0].repr_as().as_ref()))
+            .expect("ERR: failed to change directory");
+        }
+        return std::process::Command::new("");
+      },
       b"exit" => todo!(),
       // b"cd" => Box::new(crate::builtins::ChangeDirectory::new(self.args.clone())),
       // b"exit" => Box::new(crate::builtins::Exit::new(self.args.clone())),
@@ -181,7 +196,7 @@ pub fn parse(tokens: &[Token]) -> anyhow::Result<Vec<ParsedCommand>> {
           pipe_segments.push(&tokens[start..index]);
           current_expr_start = None
         },
-        None => bail!("Err: Double Pipe")
+        None => bail!("Double Pipe")
       }
     } else { if let None = current_expr_start {
       current_expr_start = Some(index)
@@ -189,9 +204,10 @@ pub fn parse(tokens: &[Token]) -> anyhow::Result<Vec<ParsedCommand>> {
   }
   if let Some(start) = current_expr_start {
     pipe_segments.push(&tokens[start..tokens.len()]);
-  }else { panic!("Err: Command ends in pipe (pipe from nowhere)") }
-
-  // println!("Segments of command: {:?}", pipe_segments);
+  }else {
+    interface::log_err("(invalid state) command ends in pipe, pipe from nowhere").unwrap();
+    panic!("invalid state");
+  }
 
   // organize subcommands
 

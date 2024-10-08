@@ -13,6 +13,8 @@ mod interface;
 mod parser;
 
 
+pub const LOGFILE: &'static str = "ajkshell_log.txt";
+
 
 trait ReprAsOsStrTrait: ReprAs<Box<[u8]>> {}
 type ReprAsOsStr = std::rc::Rc<dyn ReprAsOsStrTrait>;
@@ -50,8 +52,11 @@ impl<T: SliceTreeSource> SliceTree<T> {
   }
   pub fn subslice(&self, range: std::ops::Range<usize>) -> Self {
     if (range.start < self.range.start) |
-      (range.end > self.range.end)
-    { panic!("out of range"); }
+      (range.end > self.range.end) {
+    // { panic!("out of range"); }
+      interface::log_err("(invalid state) subslice out of range").unwrap();
+      panic!("(invalid state)");
+    }
     return Self { source: self.source.clone(), range }
   }
   pub fn as_slice<'a>(&'a self) -> &'a[u8] {
@@ -88,7 +93,12 @@ macro_rules! defer {
 
 
 fn main() {
-  let mut stdout = std::io::stdout();
+  // clear the log file
+  std::fs::write(LOGFILE, "")
+    .expect("failed to create or write to log file");
+  
+  // let mut stdout = std::io::stdout();
+  let mut writer = interface::StdoutWriter {};
 
   let path_var = format!(
     "{}{}:{}",
@@ -107,13 +117,13 @@ fn main() {
 
   let mut history: Vec<String> = vec!();
 
-  loop {
+  'main: loop {
 
     let mut cursor: usize = 0;
 
     command_buffer.clear();
     let mut history_index: Option<usize> = Some(0);
-    loop {
+    'buffer: loop {
       interface::display_command_line(cursor, &command_buffer).expect("unable to print command line");
       use crossterm::event::Event as CE;
       use crossterm::event::KeyEventKind as CKE;
@@ -122,12 +132,31 @@ fn main() {
         Ok(CE::Key(event)) => { match event.kind {
           CKE::Press => match event.code {
             CKC::Char(chr) => {
+              // check for control codes
+              match event.modifiers {
+                crossterm::event::KeyModifiers::CONTROL => {
+                  match chr {
+                    'd' => {
+                      if command_buffer.len() == 0 { break 'main; }
+                    },
+                    'c' => {
+                      writer.write(b"^C\n\r").unwrap();
+                      command_buffer.clear();
+                      cursor = 0;
+                      continue 'buffer;
+                    }
+                    _ => continue 'buffer,
+                  }
+                },
+                _ => {},
+              }
+              // otherwise add to command buffer
               command_buffer.push(chr);
               cursor += 1;
             },
             CKC::Backspace => {
               assert!(!(cursor > command_buffer.len()));
-              if cursor == 0 { continue }
+              if cursor == 0 { continue 'buffer }
               if cursor == command_buffer.len() { command_buffer.pop(); }
               else { command_buffer.remove(cursor); }
               cursor -=1;
@@ -141,48 +170,53 @@ fn main() {
               else { cursor += 1; }
             },
             CKC::Up => {
-              if history.len() == 0 { continue }
+              if history.len() == 0 { continue 'buffer }
               if let None = history_index { history_index = Some(0); }
               let index = history_index.unwrap();
               if index+1 < history.len() { history_index = Some(index+1); }
               command_buffer = history.iter().rev()
                 .nth(index)
                 .unwrap().clone();
+              cursor = command_buffer.len();
             },
             CKC::Down => {
               if let Some(index) = history_index {
                 if index == 0 {
                   history_index = None;
                   command_buffer.clear();
-                  continue
+                } else {
+                  history_index = Some(index-1);
+                  command_buffer = history.iter().rev()
+                    .nth(history_index.unwrap())
+                    .unwrap()
+                    .clone();
                 }
-                history_index = Some(index-1);
-                command_buffer = history.iter().rev()
-                  .nth(history_index.unwrap())
-                  .unwrap()
-                  .clone();
               }
+              cursor = command_buffer.len();
             },
-            CKC::Enter => break,
-            CKC::Esc => return,
-            _ => continue,
+            CKC::Enter => break 'buffer,
+            CKC::Esc => break 'main,
+            _ => continue 'buffer,
           },
-          _ => continue,
+          _ => continue 'buffer,
         }},
-        _ => continue
+        _ => continue 'buffer
       }
     }
 
-    if command_buffer.len() == 0 {
-      stdout.write(b"\n\r").unwrap();
-      stdout.flush().unwrap();
-      continue;
-    }
+    // // TODO this could be updated
+    // if command_buffer.len() == 0 {
+    //   stdout.write(b"\n\r").unwrap();
+    //   stdout.flush().unwrap();
+    //   continue;
+    // }
+    writer.write(b"\n\r").unwrap();
+    if command_buffer.len() == 0 { continue 'main; }
 
     history.push(command_buffer.clone());
 
     // TODO this is temporary for debug
-    if command_buffer.starts_with("exit") { break; }
+    if command_buffer.starts_with("exit") { break 'main; }
 
     let tokens = match parser::lex(&command_buffer) {
       Ok(tokens) => tokens,
@@ -197,7 +231,14 @@ fn main() {
     let mut children: Vec<std::process::Child> = vec!();
     for segment in command_segments.into_iter() {
       let mut command = segment.build(prev_stdout.take().map(|stdout| stdout.into()));
-      let mut child = command.spawn().expect("Failed to spawn child process");
+      let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+          interface::log_msg(format!("Failed to run command: {}", e)).unwrap();
+          // interface::log_err("failed to run command").unwrap();
+          continue 'main;
+        }
+      };
       prev_stdout = child.stdout.take();
       prev_stderr = child.stderr.take();
 
@@ -208,59 +249,35 @@ fn main() {
       child.wait().expect("Failed to wait for child process to complete");
     }
 
-    let mut writer = interface::StdoutWriter {};
-
-    writer.write(b"\n").unwrap();
-
     let mut buffer = String::new();
 
-    match prev_stdout.ok_or(anyhow!("no stdout available")) {
-      Ok(mut stdout) => match stdout.read_to_string(&mut buffer) {
-        Ok(_) => {},
-        Err(e) => interface::expect_log_error(e.into()),
+    if let Some(mut stdout) = prev_stdout {
+      if let Err(e) = stdout.read_to_string(&mut buffer) {
+        interface::log_err(e).unwrap();
       }
-      Err(e) => interface::expect_log_error(e),
     }
-
-    match writer.write(buffer.as_bytes()) {
-      Ok(_) => {},
-      Err(e) => interface::expect_log_error(e.into()),
-    }
+    if let Err(e) = writer.write(buffer.as_bytes()) { interface::log_err(e).unwrap(); }
 
     buffer.clear();
-
-    match prev_stderr.ok_or(anyhow!("no stderr available")) {
-      Ok(mut stderr) => match stderr.read_to_string(&mut buffer) {
-        Ok(_) => {},
-        Err(e) => interface::expect_log_error(e.into()),
-      },
-      Err(e) => interface::expect_log_error(e)
+    if let Some(mut stderr) = prev_stderr {
+      if let Err(e) = stderr.read_to_string(&mut buffer) {
+        interface::log_err(e).unwrap();
+      }
     }
 
-    match writer.write(buffer.as_bytes()) {
-      Ok(_) => {},
-      Err(e) => interface::expect_log_error(e.into())
+    if let Err(e) = writer.write(buffer.as_bytes()) {
+      interface::log_err(e).unwrap();
     }
-    // let mut buffer = String::new();
-    // // let final_child = children.len()-1;
-    // let _final_output = prev_stdout
-    //   .expect("unable to obtain stdout handle of child")
-    //   .read_to_string(&mut buffer);
 
-    // println!("Final result from running: {}", buffer);
-
-    // buffer.clear();
-    // let _final_err = prev_stderr
-    //   .expect("failed to retrieve previous stderr")
-    //   .read_to_string(&mut buffer);
-
-    // println!("Final Error: {}", buffer);
-
+    crossterm::execute!(writer,
+      crossterm::style::ResetColor
+    ).unwrap();
   }
 
   crossterm::execute!(
-    stdout,
+    writer,
     crossterm::style::Print("\n\r"),
+    crossterm::style::ResetColor,
   ).unwrap();
 
   let _ = _defer_disable_raw_mode;

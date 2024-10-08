@@ -59,5 +59,46 @@ pub fn expect_log_error(error: anyhow::Error) {
 }
 
 
+// any error here should be .expect()'ed because it the message
+// may not have been logged properly which might make debugging harder
+pub fn log_msg<T: std::fmt::Display>(msg: T) -> anyhow::Result<()> {
+  let mut stdout = StdoutWriter{};
+  let mut logfile = std::fs::OpenOptions::new()
+    .append(true)
+    .open(crate::LOGFILE)?;
+  let mut message = msg.to_string();
+  message.push('\n');
+
+  logfile.write(message.as_bytes())?;
+  stdout.write(message.as_bytes())?;
+
+  return Ok(());
+}
+
+// any error here should be .expect()'ed because it the message
+// may not have been logged properly which might make debugging harder
+pub fn log_err<T: std::fmt::Display>(msg: T) -> anyhow::Result<()> {
+  let mut stdout = StdoutWriter{};
+  let mut logfile = std::fs::OpenOptions::new()
+    .append(true)
+    .open(crate::LOGFILE)?;
+
+  let mut message = msg.to_string();
+  message.push('\n');
+
+  logfile.write(b"Err: ")?;
+  logfile.write(message.as_bytes())?;
+
+  use crossterm::style::{Color, SetForegroundColor};
+  crossterm::queue!(stdout,
+    SetForegroundColor(Color::Red),
+    crossterm::style::Print("Err: "),
+    SetForegroundColor(Color::Reset),
+    crossterm::style::Print(message.as_str()),
+  )?;
+
+  
+  return Ok(());
+}
 
 
