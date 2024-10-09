@@ -41,7 +41,7 @@ pub fn expect_log_error(error: anyhow::Error) {
 
 #[inline] pub fn display_command_line(cursor: usize, command: &str) -> anyhow::Result<()> {
   // let run_prompt = crate::runner::generate_run_prompt_string("pwd", &[])?;
-  let run_prompt = crate::runner::generate_run_prompt_string()?;
+  let run_prompt = crate::utils::generate_run_prompt_string()?;
   // let run_prompt = crate::runner::run_command("prompt", &[])
   //   .output().unwrap().stdin.as_slice();
   // let run_prompt = crate::runner::await_command("prompt", &[])?;
