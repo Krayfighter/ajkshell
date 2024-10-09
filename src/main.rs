@@ -5,10 +5,10 @@
 
 #[macro_use] extern crate anyhow;
 
+use std::hash::Hash;
 use std::io::{Read, Write};
 
 mod utils;
-mod runner;
 mod interface;
 mod parser;
 
@@ -97,7 +97,6 @@ fn main() {
   std::fs::write(LOGFILE, "")
     .expect("failed to create or write to log file");
   
-  // let mut stdout = std::io::stdout();
   let mut writer = interface::StdoutWriter {};
 
   let path_var = format!(
@@ -136,15 +135,17 @@ fn main() {
               match event.modifiers {
                 crossterm::event::KeyModifiers::CONTROL => {
                   match chr {
-                    'd' => {
+                    'd' => { // kill shell
                       if command_buffer.len() == 0 { break 'main; }
                     },
-                    'c' => {
+                    'c' => { // cancel line
                       writer.write(b"^C\n\r").unwrap();
                       command_buffer.clear();
                       cursor = 0;
                       continue 'buffer;
                     }
+                    // TODO word delete
+                    'w' => { todo!() },
                     _ => continue 'buffer,
                   }
                 },
@@ -215,9 +216,6 @@ fn main() {
 
     history.push(command_buffer.clone());
 
-    // TODO this is temporary for debug
-    if command_buffer.starts_with("exit") { break 'main; }
-
     let tokens = match parser::lex(&command_buffer) {
       Ok(tokens) => tokens,
       Err(e) => panic!("Err while lexing input: {}", e)
@@ -234,7 +232,10 @@ fn main() {
       let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
+          // TODO unwrap this error, this is just temporary, otherwise "cd" won't
+          // work because log_msg looks for the log file
           interface::log_msg(format!("Failed to run command: {}", e)).unwrap();
+            // .expect("failed to log error");
           // interface::log_err("failed to run command").unwrap();
           continue 'main;
         }
@@ -251,6 +252,7 @@ fn main() {
 
     let mut buffer = String::new();
 
+    // read from the stdout of the final process (first | second | final)
     if let Some(mut stdout) = prev_stdout {
       if let Err(e) = stdout.read_to_string(&mut buffer) {
         interface::log_err(e).unwrap();
@@ -258,16 +260,14 @@ fn main() {
     }
     if let Err(e) = writer.write(buffer.as_bytes()) { interface::log_err(e).unwrap(); }
 
+    // read from the stderr of the final process
     buffer.clear();
     if let Some(mut stderr) = prev_stderr {
       if let Err(e) = stderr.read_to_string(&mut buffer) {
         interface::log_err(e).unwrap();
       }
     }
-
-    if let Err(e) = writer.write(buffer.as_bytes()) {
-      interface::log_err(e).unwrap();
-    }
+    if let Err(e) = writer.write(buffer.as_bytes()) { interface::log_err(e).unwrap(); }
 
     crossterm::execute!(writer,
       crossterm::style::ResetColor

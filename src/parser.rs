@@ -136,9 +136,6 @@ impl ParsedCommand {
       })
     }
   }
-  // TODO create a new command type
-  // that allows builtin custom commands
-  // through the same interface
   pub fn build(&self,
     stdout: Option<std::process::Stdio>
   ) -> std::process::Command {
@@ -149,13 +146,9 @@ impl ParsedCommand {
           std::env::set_current_dir(crate::utils::as_os_str(self.args[0].repr_as().as_ref()))
             .expect("ERR: failed to change directory");
         }
-        return std::process::Command::new("");
+        // TODO set up a dummy command here
+        return std::process::Command::new("echo");
       },
-      b"exit" => todo!(),
-      // b"cd" => Box::new(crate::builtins::ChangeDirectory::new(self.args.clone())),
-      // b"exit" => Box::new(crate::builtins::Exit::new(self.args.clone())),
-      // cmd => Box::new(crate::runner::build_command(crate::utils::as_str(cmd), &self.args))
-      // cmd => crate::runner::OsCommand::spawn(crate::utils::as_str(cmd))
       cmd => {
         let mut command = std::process::Command::new(
           crate::utils::as_str(cmd)

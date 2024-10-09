@@ -1,0 +1,62 @@
+
+
+## Program Layout for ajkshell
+
+
+todos {
+	support for interacting with the environment,
+	shell scripting ( requires env support ),
+	stdio passthrough for interactive programs,
+}
+
+
+
+main {
+	setup
+	mainloop {
+		user input loop
+		lex (lexer) and parse (parser)
+		spawn children
+		display (interface) results
+	}
+	cleanup
+}
+
+
+environment {
+	
+}
+
+
+lexer { take raw text and return array of tokens }
+
+parser { // this could use improvement
+	take array of tokens and return
+	hierarchy of command objects
+}
+
+
+interface {}
+
+// this might allow showing stdout and stderr at
+// the same time
+new interface {
+	// C is number of collumns
+	virtual tty<const C: usize>: Write {
+		// 2D fixed size array: [[u8; cols]; rows],
+		2D arrayt Vec<[u8; cols]>,
+		newline characters also carriage return,
+		can be resized,
+		newlines shift rows up,
+	}
+}
+
+
+
+
+
+
+
+
+
+
